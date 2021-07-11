@@ -10,6 +10,10 @@ import Toolbar from '@material-ui/core/Toolbar';
 import BlockEditor  from  './components/Editor';
 import NotesBlock from './components/NotesBlock';
 
+import { openDB } from 'idb';
+
+let indexDB = null;
+
 const useStyles = makeStyles((theme) => ({
   root: {
     height: '100vh',
@@ -64,13 +68,19 @@ function App() {
   const [allNotes, pushNote] = useState([]);
   
   // LIFECYCLE
-  useEffect(() => {
+  useEffect(async () => {
+    indexDB = await openDB('work-space', 1, {
+      upgrade(db) {
+        db.createObjectStore('notes');
+      },
+    });
 
+    // LOAD INDEXDB AND DISPLAY PRESENT DATA
+    indexDB.getAll('notes').then(data => {
+        pushNote([...data])
+      }
+    );
   }, []);
-
-  useEffect(() => {
-    
-  }, [allNotes])
 
   // MEHTODS
   const onChange = (value) => {
@@ -89,6 +99,15 @@ function App() {
         notePacket
       ]
     });
+
+    indexDB.add('notes', notePacket, notePacket.time)
+      .then(result => {
+        console.log('success!', result);
+      })
+      .catch(err => {
+        console.error('error: ', err);
+      }
+    );
 
     scrollToBottom();
   }
