@@ -6,9 +6,12 @@ import { Fab } from '@material-ui/core';
 import {Add} from '@material-ui/icons';
 import AppBar from '@material-ui/core/AppBar';
 import Toolbar from '@material-ui/core/Toolbar';
+import Backdrop from '@material-ui/core/Backdrop';
+import CircularProgress from '@material-ui/core/CircularProgress';
 
 import BlockEditor  from  './components/Editor';
 import NotesBlock from './components/NotesBlock';
+import Fetch from './services/fetch.service';
 
 import { openDB } from 'idb';
 
@@ -59,30 +62,146 @@ const useStyles = makeStyles((theme) => ({
   },
   EditorButton: {
     margin: "5px"
+  },
+  backdrop: {
+    zIndex: 1000000,
+    color: '#fff',
   }
 }));
 
 function App() {
   const classes = useStyles();
+
+  const [onlineStatus, setOnlineStatus] = useState();
   const [note, setNote] = useState(null);
   const [allNotes, pushNote] = useState([]);
+  const [loading, setLoading] = useState(false);
   
   // LIFECYCLE
-  useEffect(async () => {
-    indexDB = await openDB('work-space', 1, {
-      upgrade(db) {
-        db.createObjectStore('notes');
-      },
-    });
+  useEffect(() => {
+    setLoading(true);
+    SetupIndexDB().then(() => {
+      setOnlineStatus(window.navigator.onLine);
 
-    // LOAD INDEXDB AND DISPLAY PRESENT DATA
-    indexDB.getAll('notes').then(data => {
-        pushNote([...data])
-      }
-    );
+      window.addEventListener('online',  (event) => {
+        setOnlineStatus(true);
+      });
+
+      window.addEventListener('offline', (event) => {
+        setOnlineStatus(false);
+      });
+    });
   }, []);
 
+  useEffect(() => {
+    if(!onlineStatus && indexDB) {
+      indexDB.put('meta', allNotes.length, 'SyncFrom')
+    } else if(onlineStatus && indexDB) {
+      setLoading(true);
+
+      // NEED TO FORM STANDARD PROCEDURE AND RULES FOR SYNC UP AND SYNC DOWN PROCEDURE
+
+      // SYNC UP
+      indexDB.get('meta', 'SyncFrom').then((value) => {
+        if(value || value == 0) {
+          let data = {
+            notes: allNotes.slice(value)
+          };
+  
+          Fetch.SyncNotes(data).then(response => {
+            indexDB.put('meta', null, 'SyncFrom')
+          }).catch(err => {
+            console.log(err);
+          })
+        }
+      });
+
+      // SYNC DOWN
+      Fetch.GetAllNotes().then(response => {
+        let syncNotes = Object.values(response["data"]);
+        
+        if(syncNotes.length > allNotes.length) {
+          let syncFrom = allNotes.length
+          
+          if(syncFrom >= 0) {
+            let newNotes = [...syncNotes];
+            newNotes = newNotes.slice(syncFrom);
+
+            pushNote(state => {
+              return [
+                ...state,
+                ...newNotes
+              ]
+            });
+
+            newNotes.forEach(note => {
+              indexDB.add('notes', note, note.time)
+            })
+          }
+        } 
+        setLoading(false);
+      }).catch((err) => {
+        console.log(err);
+      });
+    }
+  }, [onlineStatus])
+
   // MEHTODS
+  const SetupIndexDB = () => {
+    // Implementing Jobs one by one and then resolve to send status
+    return new Promise(async (resolve, reject) => {
+      indexDB = await openDB('work-space', 1, {
+        upgrade(db) {
+          db.createObjectStore('notes');
+          db.createObjectStore('meta');
+        },
+      });
+
+      // LOAD INDEXDB AND DISPLAY PRESENT DATA
+      // FEAT: Local DB data loaded and Render
+      await indexDB.getAll('notes').then(data => {
+          pushNote([...data])
+        }
+      );
+
+      // FETCHING FROM ONLINE
+      // Local DB data already feteched and now sync with online data
+      setLoading(true);
+      Fetch.GetAllNotes().then(response => {
+        let syncNotes = Object.values(response["data"]);
+        
+        if(syncNotes.length > allNotes.length) {
+          let syncFrom = allNotes.length
+          
+          if(syncFrom >= 0) {
+            let newNotes = [...syncNotes];
+            newNotes = newNotes.slice(syncFrom);
+
+            pushNote(state => {
+              return [
+                ...state,
+                ...newNotes
+              ]
+            });
+
+            newNotes.forEach(note => {
+              indexDB.add('notes', note, note.time)
+            })
+          }
+        }
+        setLoading(false);
+      }).catch((err) => {
+        setLoading(false);
+        console.log(err);
+      });
+  
+      await indexDB.add('meta', null, 'SyncFrom');
+
+      resolve();
+    })
+    
+  }
+
   const onChange = (value) => {
     setNote(value)
   }
@@ -108,6 +227,14 @@ function App() {
         console.error('error: ', err);
       }
     );
+
+    if(onlineStatus) {
+      Fetch.PostNote(notePacket).then(response => {
+
+      }).catch(err => {
+  
+      })
+    }
 
     scrollToBottom();
   }
@@ -179,6 +306,10 @@ function App() {
           </Grid>
         </Card>
       </Container>
+      
+      <Backdrop className={classes.backdrop} open={loading}>
+        <CircularProgress color="inherit" />
+      </Backdrop>
     </Box>
   );
 }
