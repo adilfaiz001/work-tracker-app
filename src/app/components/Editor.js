@@ -44,7 +44,6 @@ const BlockEditor = forwardRef((props, ref) => {
 
 	function onEditorStateChange(_editorState) {
 		setEditorState(_editorState);
-
 		return props.onChange(draftToHtml(convertToRaw(_editorState.getCurrentContent())));   // THIS IS TO RETURN PARENT FUNCTION CALL VALUE ON PROPS
 	}
 

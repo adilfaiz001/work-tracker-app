@@ -13,6 +13,9 @@ import BlockEditor  from  './components/Editor';
 import NotesBlock from './components/NotesBlock';
 import Fetch from './services/fetch.service';
 
+// MAPS
+import { WebToGlobal } from './mapping/web.markup';
+
 import { openDB } from 'idb';
 
 let indexDB = null;
@@ -75,6 +78,7 @@ function App() {
   const [onlineStatus, setOnlineStatus] = useState();
   const [note, setNote] = useState(null);
   const [allNotes, pushNote] = useState([]);
+  const [globalJSON, setGlobalJSON] = useState([]);
   const [loading, setLoading] = useState(false);
   
   // LIFECYCLE
@@ -119,7 +123,6 @@ function App() {
       // SYNC DOWN
       Fetch.GetAllNotes().then(response => {
         let syncNotes = Object.values(response["data"]);
-        
         if(syncNotes.length > allNotes.length) {
           let syncFrom = allNotes.length
           
@@ -142,6 +145,7 @@ function App() {
         setLoading(false);
       }).catch((err) => {
         console.log(err);
+        setLoading(false);
       });
     }
   }, [onlineStatus])
@@ -203,38 +207,42 @@ function App() {
   }
 
   const onChange = (value) => {
-    setNote(value)
+    setNote(value);
   }
 
-  const onAddSpace = () => {
+  const onAddSpace = () => { 
     let notePacket = {
       time: new Date().getTime(),
       data: note
     };
 
-    pushNote(state => {
-      return [
-        ...state,
-        notePacket
-      ]
-    });
+    ProcessMarkup(notePacket.data).then(res => {
+      pushNote(state => {
+        return [
+          ...state,
+          res
+        ]
+      });
 
-    indexDB.add('notes', notePacket, notePacket.time)
-      .then(result => {
-        console.log('success!', result);
-      })
-      .catch(err => {
-        console.error('error: ', err);
+      indexDB.add('notes', res, notePacket.time)
+        .then(result => {
+          console.log('success!', result);
+        })
+        .catch(err => {
+          console.error('error: ', err);
+        }
+      );
+
+      if(onlineStatus) {
+        Fetch.PostNote(notePacket).then(response => {
+
+        }).catch(err => {
+    
+        })
       }
-    );
+    }).catch(err => {
 
-    if(onlineStatus) {
-      Fetch.PostNote(notePacket).then(response => {
-
-      }).catch(err => {
-  
-      })
-    }
+    });
 
     scrollToBottom();
   }
@@ -243,6 +251,60 @@ function App() {
     var objDiv = document.getElementById("space-content");
     objDiv.scrollTop = objDiv.scrollHeight + 10000000000000000;
   }; 
+
+  // Process markup and update globalJSON accordingly
+  const ProcessMarkup = (value) => {
+    return new Promise(async (resolve, reject) => {
+      // GET STARTING TAG
+      let x0 = value.search(/^(<)/);
+      let y0 = value.search(/(>)/);
+      let OpenTag = value.slice(x0, y0+1);
+
+      // GET CLOSE TAG AND INPUT
+      let tempValue = value.slice(y0+1);
+      let x1 = tempValue.search(/(<)/);
+      let y1 = tempValue.search(/(>)/);
+      let inputValue = tempValue.slice(0, x1);
+
+      let pattern = /^https?\:\/\/(?:www\.youtube(?:\-nocookie)?\.com\/|m\.youtube\.com\/|youtube\.com\/)?(?:ytscreeningroom\?vi?=|youtu\.be\/|vi?\/|user\/.+\/u\/\w{1,2}\/|embed\/|watch\?(?:.*\&)?vi?=|\&vi?=|\?(?:.*\&)?vi?=)([^#\&\?\n\/<>"']*)/i
+      
+      if(pattern.test(inputValue)) {
+        await setGlobalJSON(state => {
+          return [
+            ...state,
+            {
+              tag: "embeded",
+              content: inputValue,
+              data: value
+            }
+          ]
+        })
+
+        resolve({
+          tag: "embeded",
+          content: inputValue,
+          data: value
+        });
+      } else {
+        await setGlobalJSON(state => {
+          return [
+            ...state,
+            {
+              tag: WebToGlobal[OpenTag],
+              content: inputValue,
+              data: value
+            }
+          ]
+        })
+
+        resolve({
+          tag: WebToGlobal[OpenTag],
+          content: inputValue,
+          data: value
+        });
+      }
+    })
+  }
 
   return (
     <Box className={classes.root}>
